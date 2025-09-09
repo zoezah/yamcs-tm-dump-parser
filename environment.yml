@@ -1,0 +1,7 @@
+name: tm-reader
+channels: [conda-forge]
+dependencies:
+  - python>=3.10
+  - pip
+  - pip:
+      - spacepackets==0.30.1
