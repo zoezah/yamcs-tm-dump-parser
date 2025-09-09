@@ -4,3 +4,10 @@ __pycache__/
 env/
 .ipynb_checkpoints/
 .conda/
+
+
+# telemetry dumps
+*.raw
+*.dump
+*.bin
+

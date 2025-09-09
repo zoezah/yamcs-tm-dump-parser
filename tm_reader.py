@@ -1,3 +1,6 @@
+# run script with: python tm_reader.py packets.raw
+
+
 import sys, struct, re
 from pathlib import Path
 
