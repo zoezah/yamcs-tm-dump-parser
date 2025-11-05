@@ -2,12 +2,15 @@ current_tc = None
 current_tm = None
 
 previous_info = None
-frames_left = 0
+
+tc_frames_left = 0
+tm_frames_left = 0
 
 tcs_grouped = []
 tms_grouped = []
 
 decoded_tcs = []
+decoded_tms = []
 
 
 def parse_line(line):
@@ -45,7 +48,6 @@ def is_tc_header(info, previous_info=None):
     #print(f"The Data field length of the following TC is: {data_field_length} bytes")
     if data_field_length <= 8:
         frames_nr = 1
-        print(f"The following frame belongs to this TC")
         return frames_nr
     else: 
         frames_nr, remainder = divmod(data_field_length, 8)
@@ -53,6 +55,30 @@ def is_tc_header(info, previous_info=None):
             frames_nr += 1
     return frames_nr
     
+def is_tm_header(info, previous_info=None):
+    if not info["can_id"].startswith("08"):
+        return 0
+    if info["data_length"] != 8:
+        return 0
+    if previous_info and previous_info["can_id"].startswith("04"):
+        if info["data"] == previous_info["data"]:
+            return 0
+    parts = line.split()
+    data = parts[5:]
+    ccsds_header = data[1:len(data)-1]
+    ccsds_header.reverse()
+    #print(f"The TM CCSDS header is: {ccsds_header}")
+    last_two_bytes = ccsds_header[4:6]
+    data_field_length = int("".join(last_two_bytes), 16) + 1
+    #print(f"The Data field length of the following TM is: {data_field_length} bytes")
+    if data_field_length <= 8:
+        frames_nr = 1
+        return frames_nr
+    else:
+        frames_nr, remainder = divmod(data_field_length, 8)
+        if remainder != 0:
+            frames_nr += 1
+        return frames_nr
 
 def decode_apid(tc):
     data = tc["header"]["data"]
@@ -89,10 +115,10 @@ with open("candump_svc_23_copy_move_file.txt") as logfile:
             continue
         
         # === CASE 1: continue collecting frames ===
-        if frames_left > 0 and info["can_id"].startswith("04"):
+        if tc_frames_left > 0 and info["can_id"].startswith("04"):
             current_tc["frames"].append(info)
-            frames_left -= 1
-            if frames_left == 0:
+            tc_frames_left -= 1
+            if tc_frames_left == 0:
                 tcs_grouped.append(current_tc)
                 pus_info = decode_pus_secondary_header(current_tc)
                 if pus_info:
@@ -110,18 +136,51 @@ with open("candump_svc_23_copy_move_file.txt") as logfile:
                 current_tc = None
             previous_info = info
             continue
+        
+        if tm_frames_left > 0 and info["can_id"].startswith("08"):
+            current_tm["frames"].append(info)
+            tm_frames_left -= 1
+            if tm_frames_left == 0:
+                tms_grouped.append(current_tm)
+                pus_info = decode_pus_secondary_header(current_tm)
+                if pus_info:
+                    apid = decode_apid(current_tm)
+                    decoded_tms.append({
+                        "time": current_tm["start_time"],
+                        "type": pus_info["type"],
+                        "subtype": pus_info["subtype"],
+                        "frames": len(current_tm["frames"]),
+                        "apid": apid,
+                    })
+                    print(f"→ TM[{pus_info['type']},{pus_info['subtype']}] to APID {apid} at {current_tm['start_time']}")
+                
+                current_tm = None
+            previous_info = info
+            continue
 
-
-        # === CASE 2: check if new TC header ===
-        frames_nr = is_tc_header(info, previous_info)
-        if frames_nr:
+        # === CASE 2: check if new header ===
+        tc_frames_nr = is_tc_header(info, previous_info)
+        if tc_frames_nr:
             #print("TC header found:", info["can_id"], info["data"])
-            frames_left = frames_nr
+            tc_frames_left = tc_frames_nr
             current_tc = {
                 "start_time": info["timestamp"],
                 "header": info,
                 "frames": [info]
             }
+        else:       # if not TC header, check if it is a TM header
+            tm_frames_nr = is_tm_header(info, previous_info)
+            if tm_frames_nr:
+                #print("TM header found:", info["can_id"], info["data"])
+                tm_frames_left = tm_frames_nr
+                current_tm = {
+                    "start_time": info["timestamp"],
+                    "header": info,
+                    "frames": [info]
+                }
+
+             
+        
 
         previous_info = info
 
@@ -129,3 +188,8 @@ with open("candump_svc_23_copy_move_file.txt") as logfile:
     for i, tc in enumerate(decoded_tcs, start=1):
         print(f"{i:02d} | {tc['time']} | TC[{tc['type']},{tc['subtype']}] | {tc['frames']} frames")
     print(f"Total TCs found: {len(decoded_tcs)}")
+
+    print("\n=== Summary of TMs ===")
+    for i, tc in enumerate(decoded_tms, start=1):
+        print(f"{i:02d} | {tc['time']} | TM[{tc['type']},{tc['subtype']}] | {tc['frames']} frames")
+    print(f"Total TMs found: {len(decoded_tms)}")
