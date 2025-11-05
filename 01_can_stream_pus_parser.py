@@ -1,3 +1,12 @@
+import subprocess
+
+proc = subprocess.Popen(
+    ["candump", "-t", "A", "can0"],
+    stdout=subprocess.PIPE,
+    text=True,
+    bufsize=1
+)
+
 current_tc = None
 current_tm = None
 
@@ -22,13 +31,6 @@ def parse_line(line):
     data = parts[5::]
     return{"timestamp": timestamp, "can_id": can_id, "data_length": data_length, "data": data}
 
-def detect_frame_type(can_id: str):
-    if can_id.startswith("04"):
-        return "TC"
-    if can_id.startswith("08"):
-        return "TM"
-    else:
-        return "OTHER"
 
 def is_tc_header(info, previous_info=None):
     if not info["can_id"].startswith("04"):
@@ -90,6 +92,15 @@ def decode_apid(tc):
     apid = first_two_bytes & 0x07FF   # keep the last 11 bits
     return apid  
 
+def decode_sequence_count(tc):
+    data = tc["header"]["data"]
+    ccsds_header = data[1:len(data)-1]
+    ccsds_header.reverse()
+    if len(data) < 2:
+        return None
+    next_two_bytes = int("".join(ccsds_header[2:4]), 16)
+    seq_count = next_two_bytes & 0x3FFF     # keep the last 14 bits
+    return seq_count
 
 def decode_pus_secondary_header(tc):
     if len(tc["frames"]) < 2:
@@ -105,8 +116,8 @@ def decode_pus_secondary_header(tc):
     return {"type": pus_type, "subtype": pus_subtype}
     
 
-with open("candump_svc_23_copy_move_file.txt") as logfile:
-    for line in logfile:
+try:
+    for line in proc.stdout:
         if not line.strip():
             continue
 
@@ -123,14 +134,16 @@ with open("candump_svc_23_copy_move_file.txt") as logfile:
                 pus_info = decode_pus_secondary_header(current_tc)
                 if pus_info:
                     apid = decode_apid(current_tc)
+                    seq = decode_sequence_count(current_tc)
                     decoded_tcs.append({
                         "time": current_tc["start_time"],
                         "type": pus_info["type"],
                         "subtype": pus_info["subtype"],
                         "frames": len(current_tc["frames"]),
                         "apid": apid,
+                        "seq": seq,
                     })
-                    print(f"→ TC[{pus_info['type']},{pus_info['subtype']}] to APID {apid} at {current_tc['start_time']}")
+                    print(f"→ TC[{pus_info['type']},{pus_info['subtype']}] to APID {apid} (seq {seq}) at {current_tc['start_time']}")
 
 
                 current_tc = None
@@ -145,14 +158,16 @@ with open("candump_svc_23_copy_move_file.txt") as logfile:
                 pus_info = decode_pus_secondary_header(current_tm)
                 if pus_info:
                     apid = decode_apid(current_tm)
+                    seq = decode_sequence_count(current_tm)
                     decoded_tms.append({
                         "time": current_tm["start_time"],
                         "type": pus_info["type"],
                         "subtype": pus_info["subtype"],
                         "frames": len(current_tm["frames"]),
                         "apid": apid,
+                        "seq": seq,
                     })
-                    print(f"→ TM[{pus_info['type']},{pus_info['subtype']}] to APID {apid} at {current_tm['start_time']}")
+                    print(f"→ TM[{pus_info['type']},{pus_info['subtype']}] to APID {apid}(seq {seq}) at {current_tm['start_time']}")
                 
                 current_tm = None
             previous_info = info
@@ -183,13 +198,17 @@ with open("candump_svc_23_copy_move_file.txt") as logfile:
         
 
         previous_info = info
+except:
+    print("\nStopped live parsing.")
 
     print("\n=== Summary of TCs ===")
     for i, tc in enumerate(decoded_tcs, start=1):
-        print(f"{i:02d} | {tc['time']} | TC[{tc['type']},{tc['subtype']}] | {tc['frames']} frames")
+        print(f"{i:02d} | {tc['time']} | APID {tc['apid']} | "
+            f"TC[{tc['type']},{tc['subtype']}] | seq {tc['seq']} | {tc['frames']} frames")
     print(f"Total TCs found: {len(decoded_tcs)}")
 
     print("\n=== Summary of TMs ===")
-    for i, tc in enumerate(decoded_tms, start=1):
-        print(f"{i:02d} | {tc['time']} | TM[{tc['type']},{tc['subtype']}] | {tc['frames']} frames")
+    for i, tm in enumerate(decoded_tms, start=1):
+        print(f"{i:02d} | {tm['time']} | APID {tm['apid']} | "
+            f"TM[{tm['type']},{tm['subtype']}] | seq {tm['seq']} | {tm['frames']} frames")
     print(f"Total TMs found: {len(decoded_tms)}")
