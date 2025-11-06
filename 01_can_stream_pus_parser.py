@@ -167,7 +167,7 @@ try:
                         "apid": apid,
                         "seq": seq,
                     })
-                    print(f"→ TM[{pus_info['type']},{pus_info['subtype']}] to APID {apid}(seq {seq}) at {current_tm['start_time']}")
+                    print(f"→ TM[{pus_info['type']},{pus_info['subtype']}] from APID {apid}(seq {seq}) at {current_tm['start_time']}")
                 
                 current_tm = None
             previous_info = info
